@@ -14,6 +14,7 @@ import { useAccount } from '@/contexts/AccountContext';
 import { AddAccountModal } from '@/features/assets/components/AddAccountModal';
 import { generateId } from '@/utils/ids';
 import { refreshAllHoldings } from '@/utils/marketService';
+import { parseCSVDate, parseCSVNumber, normalizeStr, isMFLotDuplicate } from '@/import';
 
 // Set worker Src using locally bundled worker URL (100% offline)
 pdfjs.GlobalWorkerOptions.workerSrc = pdfWorkerSrc;
@@ -273,121 +274,6 @@ function autoDetectMapping(headers: string[]): Partial<ColumnMapping> {
   }
 
   return mapping;
-}
-
-// ─── Date and number parsing helpers ─────────────────────────────────────────
-
-function parseCSVDate(dateStr: string): number {
-  if (!dateStr) return Date.now();
-  const cleaned = dateStr.trim();
-
-  // DD-MM-YYYY or DD/MM/YYYY
-  const dmyMatch = cleaned.match(/^(\d{1,2})[-/](\d{1,2})[-/](\d{4})$/);
-  if (dmyMatch) {
-    const [, d, m, y] = dmyMatch;
-    return new Date(parseInt(y, 10), parseInt(m, 10) - 1, parseInt(d, 10), 12, 0, 0).getTime();
-  }
-
-  // YYYY-MM-DD
-  const ymdMatch = cleaned.match(/^(\d{4})[-/](\d{1,2})[-/](\d{1,2})$/);
-  if (ymdMatch) {
-    const [, y, m, d] = ymdMatch;
-    return new Date(parseInt(y, 10), parseInt(m, 10) - 1, parseInt(d, 10), 12, 0, 0).getTime();
-  }
-
-  // DD-MMM-YYYY
-  const dmmmYMatch = cleaned.match(/^(\d{1,2})[-/]([a-zA-Z]{3})[-/](\d{2,4})$/);
-  if (dmmmYMatch) {
-    const [, d, mStr, yStr] = dmmmYMatch;
-    const months: Record<string, number> = {
-      jan: 0, feb: 1, mar: 2, apr: 3, may: 4, jun: 5,
-      jul: 6, aug: 7, sep: 8, oct: 9, nov: 10, dec: 11
-    };
-    const m = months[mStr.toLowerCase()];
-    if (m !== undefined) {
-      let y = parseInt(yStr, 10);
-      if (yStr.length === 2) {
-        y += y < 50 ? 2000 : 1900;
-      }
-      return new Date(y, m, parseInt(d, 10), 12, 0, 0).getTime();
-    }
-  }
-
-  const parsed = Date.parse(cleaned);
-  return isNaN(parsed) ? Date.now() : parsed;
-}
-
-function parseCSVNumber(numStr?: string): number {
-  if (!numStr) return 0;
-  const cleaned = numStr.replace(/[^0-9.-]/g, '');
-  const n = parseFloat(cleaned);
-  return isNaN(n) ? 0 : n;
-}
-
-function normalizeStr(s?: string): string {
-  return (s || '').toLowerCase().replace(/[^a-z0-9]/g, '');
-}
-
-function isMFLotDuplicate(
-  row: ParsedRow,
-  lot: InvestmentLot,
-  tradeDate: number,
-  pricePaise: number
-): boolean {
-  let identifierMatch = false;
-
-  const rowIsin = row.isin?.trim().toUpperCase();
-  const lotIsin = lot.isin?.trim().toUpperCase();
-  const lotSymUpper = lot.symbol.trim().toUpperCase();
-  const rowSymUpper = (row.symbol || '').trim().toUpperCase();
-
-  const cleanRowSchemeCode = row.schemeCode?.trim().toUpperCase().replace(/^AMFI:/, '');
-  const cleanLotSchemeCode = lot.symbol.trim().toUpperCase().startsWith('AMFI:')
-    ? lot.symbol.trim().toUpperCase().slice(5)
-    : undefined;
-
-  // PRIORITY 1: ISIN match
-  if (rowIsin) {
-    if (lotIsin && lotIsin === rowIsin) {
-      identifierMatch = true;
-    } else if (lotSymUpper === rowIsin) {
-      identifierMatch = true;
-    }
-  }
-
-  // PRIORITY 2: AMFI Code match
-  if (!identifierMatch && cleanRowSchemeCode) {
-    if (cleanLotSchemeCode && cleanLotSchemeCode === cleanRowSchemeCode) {
-      identifierMatch = true;
-    } else if (lotSymUpper.replace(/^AMFI:/, '') === cleanRowSchemeCode) {
-      identifierMatch = true;
-    }
-  }
-
-  // PRIORITY 3: Scheme Name / Symbol fallback
-  if (!identifierMatch && (!rowIsin || !lotIsin) && (!cleanRowSchemeCode || !cleanLotSchemeCode)) {
-    const rowNormName = normalizeStr(row.description || row.symbol);
-    const lotNormName = normalizeStr(lot.name || lot.symbol);
-    if (rowNormName && lotNormName && (rowNormName === lotNormName || rowNormName.includes(lotNormName) || lotNormName.includes(rowNormName))) {
-      identifierMatch = true;
-    } else if (rowSymUpper && (lotSymUpper === rowSymUpper || lotSymUpper.replace(/^AMFI:/, '') === rowSymUpper.replace(/^AMFI:/, ''))) {
-      identifierMatch = true;
-    }
-  }
-
-  if (!identifierMatch) return false;
-
-  const unitsMatch = Math.abs(lot.units_original - (row.units ?? 0)) < 0.005;
-  if (!unitsMatch) return false;
-
-  const dateMatch = Math.abs(lot.purchase_date - tradeDate) <= 108000000 ||
-    new Date(lot.purchase_date).toDateString() === new Date(tradeDate).toDateString();
-  if (!dateMatch) return false;
-
-  const priceDiff = Math.abs(lot.purchase_price_paise - pricePaise);
-  const priceMatch = priceDiff <= 50 || (lot.purchase_price_paise > 0 && (priceDiff / lot.purchase_price_paise) <= 0.02);
-
-  return priceMatch;
 }
 
 // ─── Modal Component ─────────────────────────────────────────────────────────

@@ -13,6 +13,7 @@ This document provides a comprehensive technical overview of the design patterns
 6. [High-Precision XIRR Engine](#6-high-precision-xirr-engine)
 7. [Live AMFI NAV Integration & Market Cache](#7-live-amfi-nav-integration--market-cache)
 8. [Zero-Knowledge Security & Backup Architecture](#8-zero-knowledge-security--backup-architecture)
+9. [Domain-Driven Architecture & Layer Isolation](#9-domain-driven-architecture--layer-isolation)
 
 ---
 
@@ -218,3 +219,31 @@ MFLedger utilizes an optimized Newton-Raphson annualized return calculator (`src
 *   **PBKDF2 Key Derivation**: Uses 100,000 iterations of SHA-256 with a fresh 16-byte cryptographically secure random salt.
 *   **AES-256-GCM Encryption**: Generates a fresh 12-byte IV per export. Backups are exported as self-describing `.mfledger` encrypted JSON files.
 *   **Local PDF.js Processing**: PDF parsing of CAS statements uses a locally bundled Web Worker (`pdf.worker.min.mjs`), ensuring zero third-party script execution.
+
+---
+
+## 9. Domain-Driven Architecture & Layer Isolation
+
+To maintain longevity, mathematical purity, and open-source auditability, MFLedger enforces strict layer boundaries:
+
+```
+src/
+├── domain/            # 🧠 Pure mathematical models (Pure TypeScript: NO React, NO Dexie, NO network)
+│   ├── fifo/          # Pure FIFO lot redemption allocator (allocateFIFORedemption)
+│   ├── tax/           # Pure Indian capital gains (Sec 112A/111A/50AA), holding periods, FY calculations
+│   ├── xirr/          # Pure Newton-Raphson cashflow solver and cache
+│   └── sip/           # Pure cadence detection, step-up tolerance, and stream analytics
+├── data/
+│   └── providers/     # 🌐 External data fetchers (MFAPI.in, AMFI feeds)
+├── import/
+│   └── csv/           # 📄 Statement & CAS parsers (CAMS, KFintech, generic CSV)
+├── db/                # 💾 Persistence layer (Dexie.js IndexedDB schema, migrations, seeders)
+├── features/          # 📱 User interface feature views (React components, state, hooks)
+└── components/        # 🎨 Reusable design system primitives (modals, dropdowns, tables)
+```
+
+### The Domain Boundary Invariants
+1. **Zero Framework Dependencies**: Code in `src/domain/` MUST NOT import React, Dexie, IndexedDB, or DOM elements.
+2. **Zero Network / Cloud Dependencies**: No `fetch`, no Cloudflare Workers, no KV store dependencies.
+3. **Pure Function Contract**: Functions take plain TypeScript data structures as arguments and return calculated results.
+4. **Zero-Mock Testing**: All domain modules can be tested aggressively in milliseconds without running a browser or database mock.

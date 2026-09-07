@@ -3,6 +3,7 @@ import type { InvestmentLot, LotConsumptionEvent, AssetClass } from '../db/schem
 import { generateId } from '../utils/ids';
 import { holdingMonths } from '../utils/fiscalYear';
 import { calculateXIRR } from '../utils/xirr';
+import { allocateFIFORedemption } from '@/domain/fifo';
 
 export interface BuyLotInput {
   account_id: string;
@@ -88,7 +89,7 @@ export async function updateLotInvestmentType(lotId: string, investment_type: 'S
 /**
  * Execute FIFO sale for a mutual fund symbol.
  * RULE: Sort lots by purchase_date ASC (oldest first), consume them in order.
- * Uses event sourcing: writes consumption events, updates units_remaining.
+ * Uses pure domain/fifo engine for calculation and Dexie for event-sourced persistence.
  */
 export async function sellFIFO(params: {
   account_id: string;
@@ -107,61 +108,39 @@ export async function sellFIFO(params: {
     .filter(l => l.symbol === symbol && l.units_remaining > 0)
     .sortBy('purchase_date');
 
-  const totalAvailable = lots.reduce((sum, l) => sum + l.units_remaining, 0);
-  if (totalAvailable < units_to_sell) {
-    throw new Error(
-      `Insufficient units. Available: ${totalAvailable.toFixed(4)}, Requested: ${units_to_sell.toFixed(4)}`
-    );
-  }
+  // Compute allocation via pure domain engine
+  const allocation = allocateFIFORedemption(lots, {
+    units_to_sell,
+    sale_price_per_unit_paise,
+    sale_date,
+    holding_period_months_threshold: params.holding_period_months_threshold ?? 12,
+  });
 
-  const results: SaleLotResult[] = [];
-  let remainingToSell = units_to_sell;
   const now = Date.now();
 
-  for (const lot of lots) {
-    if (remainingToSell <= 0) break;
-
-    const unitsFromThisLot = Math.min(lot.units_remaining, remainingToSell);
-    const gainPaise = Math.round(
-      unitsFromThisLot * (sale_price_per_unit_paise - lot.purchase_price_paise)
-    );
-    const months = holdingMonths(lot.purchase_date, sale_date);
-    const threshold = params.holding_period_months_threshold ?? 12;
-
-    // Write consumption event (event sourcing)
+  // Persist consumption events (event sourcing)
+  for (const consumed of allocation.consumed_lots) {
     const event: LotConsumptionEvent = {
       id: generateId('evt'),
-      lot_id: lot.id,
-      units_consumed: unitsFromThisLot,
-      sale_price_paise: sale_price_per_unit_paise,
+      lot_id: consumed.lot_id,
+      units_consumed: consumed.units_consumed,
+      sale_price_paise: consumed.sale_price_paise,
       created_at: sale_date,
     };
     await db.lot_consumption_events.add(event);
-
-    // Update units_remaining
-    const newUnitsRemaining = lot.units_remaining - unitsFromThisLot;
-    await db.investment_lots.update(lot.id, {
-      units_remaining: newUnitsRemaining,
-      status: newUnitsRemaining < 1e-6 ? 'CLOSED' : 'ACTIVE',
-      updated_at: now,
-      version: lot.version + 1,
-    });
-
-    results.push({
-      lot_id: lot.id,
-      units_consumed: unitsFromThisLot,
-      purchase_date: lot.purchase_date,
-      purchase_price_paise: lot.purchase_price_paise,
-      sale_price_paise: sale_price_per_unit_paise,
-      gain_paise: gainPaise,
-      holding_months: months,
-      is_long_term: months >= threshold,
-    });
-
-    remainingToSell -= unitsFromThisLot;
   }
 
-  return results;
+  // Update units_remaining on purchase lots
+  for (const updated of allocation.updated_lots) {
+    await db.investment_lots.update(updated.id, {
+      units_remaining: updated.units_remaining,
+      status: updated.status,
+      updated_at: now,
+      version: updated.nextVersion,
+    });
+  }
+
+  return allocation.consumed_lots;
 }
 
 /**

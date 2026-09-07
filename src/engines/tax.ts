@@ -2,18 +2,12 @@ import { db } from '../db/schema';
 import type { AssetClass, TaxMode } from '../db/schema';
 import { holdingMonths, getFiscalYear } from '../utils/fiscalYear';
 import { sellFIFO, type SaleLotResult } from './fifo';
+import {
+  calculateCapitalGainsTax,
+  getDefaultHoldingMonths,
+} from '@/domain/tax';
 
-/**
- * Default holding period threshold (months) by asset class when no tax rule is found.
- * GOLD_MF: 24 months (as per Indian tax law)
- * DEBT_MF / LIQUID_MF: 36 months (as per Indian tax law post-Apr 2023 indexation rules)
- * Equity / Others: 12 months
- */
-export function getDefaultHoldingMonths(ac: AssetClass): number {
-  if (ac === 'GOLD_MF') return 24;
-  if (ac === 'DEBT_MF' || ac === 'LIQUID_MF') return 36;
-  return 12;
-}
+export { getDefaultHoldingMonths };
 
 export interface TaxLot {
   purchase_date: number;
@@ -61,7 +55,7 @@ export async function getApplicableTaxRule(asset_class: AssetClass, at_date: num
 
 /**
  * Compute STCG/LTCG for a set of FIFO sale results
- * RULE: tax rates stored as basis points (2000 = 20%)
+ * Storage adapter delegating calculation to pure domain layer.
  */
 export async function computeTaxForSale(
   sale_results: SaleLotResult[],
@@ -81,45 +75,11 @@ export async function computeTaxForSale(
     throw new Error(`No tax rule found for asset class: ${asset_class}`);
   }
 
-  let total_stcg_paise = 0;
-  let total_ltcg_paise = 0;
-
-  for (const lot of sale_results) {
-    const months = holdingMonths(lot.purchase_date, sale_date);
-    const isLongTerm = months >= rule.holding_period_months;
-    const gain = lot.gain_paise;
-
-    if (isLongTerm) {
-      total_ltcg_paise += Math.max(0, gain);
-    } else {
-      total_stcg_paise += Math.max(0, gain);
-    }
-  }
-
-  // Apply LTCG exemption
-  const ltcg_after_exemption_paise = Math.max(0, total_ltcg_paise - rule.exemption_cap_paise);
-
-  // Compute taxes (basis points to percentage: bps / 10000)
-  const stcg_rate = rule.stcg_rate_bps / 10000;
-  const ltcg_rate = rule.ltcg_rate_bps / 10000;
-
-  const tax_on_stcg_paise = rule.stcg_mode === 'FIXED_PERCENTAGE'
-    ? Math.round(total_stcg_paise * stcg_rate)
-    : 0; // SLAB_RATE: user applies their income tax slab rate
-
-  const tax_on_ltcg_paise = rule.ltcg_mode === 'FIXED_PERCENTAGE'
-    ? Math.round(ltcg_after_exemption_paise * ltcg_rate)
-    : 0;
-
-  return {
-    total_stcg_paise,
-    total_ltcg_paise,
-    ltcg_exemption_remaining_paise: rule.exemption_cap_paise,
-    ltcg_after_exemption_paise,
-    tax_on_stcg_paise,
-    tax_on_ltcg_paise,
-    rule_applied: rule.name,
-  };
+  return calculateCapitalGainsTax(
+    sale_results.map(l => ({ purchase_date: l.purchase_date, gain_paise: l.gain_paise })),
+    rule,
+    sale_date
+  );
 }
 
 /**

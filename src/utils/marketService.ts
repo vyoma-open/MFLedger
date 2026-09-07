@@ -44,73 +44,27 @@ interface MFAPIResponse {
   status: string;
 }
 
-export interface MFFetchData {
-  nav: number;
-  date: number;
-  name: string;
-  rawPayload: string;
-}
+import {
+  fetchMFNav as providerFetchMFNav,
+  searchMFByName,
+  type MFFetchData,
+} from '@/data/providers';
 
-/**
- * Fetches the latest NAV for a given numeric AMFI scheme code from MFAPI.in.
- */
+export type { MFFetchData };
+
 export async function fetchMFNav(schemeCode: string): Promise<MFFetchData | null> {
-  const url = `https://api.mfapi.in/mf/${encodeURIComponent(schemeCode)}`;
-  try {
-    const res = await fetch(url);
-    if (!res.ok) return null;
-    const data: MFAPIResponse = await res.json();
-    if (data.status !== 'SUCCESS' || !data.data || data.data.length === 0) return null;
-
-    const latest = data.data[0];
-    const nav = parseFloat(latest.nav);
-    if (isNaN(nav)) return null;
-
-    // Parse 'DD-MM-YYYY' or 'DD-MMM-YYYY' → ISO timestamp
-    const parts = latest.date.split('-');
-    let monthStr = parts[1];
-    if (isNaN(Number(monthStr))) {
-      const months: Record<string, string> = {
-        Jan: '01', Feb: '02', Mar: '03', Apr: '04', May: '05', Jun: '06',
-        Jul: '07', Aug: '08', Sep: '09', Oct: '10', Nov: '11', Dec: '12',
-      };
-      monthStr = months[monthStr] ?? '01';
-    }
-    const isoDate = `${parts[2]}-${monthStr.padStart(2, '0')}-${parts[0].padStart(2, '0')}`;
-    const dateTs = new Date(`${isoDate}T06:30:00Z`).getTime();
-
-    return {
-      nav,
-      date: isNaN(dateTs) ? Date.now() : dateTs,
-      name: data.meta.scheme_name,
-      rawPayload: JSON.stringify(data.meta),
-    };
-  } catch {
-    return null;
-  }
+  return providerFetchMFNav(schemeCode);
 }
 
 // ─── MF Code Resolution ───────────────────────────────────────────────────────
 
-interface MFSearchResult {
-  schemeCode: number;
-  schemeName: string;
-}
-
 export async function resolveMFSchemeCode(name: string): Promise<{ schemeCode: string; schemeName: string } | null> {
-  const url = `https://api.mfapi.in/mf/search?q=${encodeURIComponent(name)}`;
-  try {
-    const res = await fetch(url);
-    if (!res.ok) return null;
-    const data: MFSearchResult[] = await res.json();
-    if (!Array.isArray(data) || data.length === 0) return null;
-    return {
-      schemeCode: String(data[0].schemeCode),
-      schemeName: data[0].schemeName,
-    };
-  } catch {
-    return null;
-  }
+  const code = await searchMFByName(name);
+  if (!code) return null;
+  return {
+    schemeCode: code,
+    schemeName: name,
+  };
 }
 
 // ─── Extract scheme code from symbol ─────────────────────────────────────────
