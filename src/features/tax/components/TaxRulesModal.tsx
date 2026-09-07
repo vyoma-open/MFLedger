@@ -1,7 +1,8 @@
 import React, { useState, useMemo } from 'react';
 import { useLiveQuery } from 'dexie-react-hooks';
-import { Pencil, Check, X, Trash2, Plus, Info, Receipt } from 'lucide-react';
+import { Pencil, Check, X, Trash2, Plus, Info, Receipt, RotateCcw } from 'lucide-react';
 import { db, ASSET_CLASS_LABELS, type TaxRule, type AssetClass, type TaxMode } from '@/db/schema';
+import { resetTaxRulesToDefaults } from '@/db/seed';
 import { formatINR } from '@/utils/currency';
 import { generateId } from '@/utils/ids';
 import { useConfirm } from '@/contexts/ConfirmContext';
@@ -98,7 +99,7 @@ export function TaxRulesModal({ isOpen, onClose }: TaxRulesModalProps) {
       stcg_rate_bps: 2000, // 20%
       ltcg_mode: 'FIXED_PERCENTAGE',
       ltcg_rate_bps: 1250, // 12.5%
-      exemption_cap_paise: 0,
+      exemption_cap_paise: 12500000, // ₹1.25L exemption (Budget 2025-26)
       effective_from: now,
       effective_until: null,
       created_at: now,
@@ -110,6 +111,21 @@ export function TaxRulesModal({ isOpen, onClose }: TaxRulesModalProps) {
 
     // Automatically start editing the new rule
     startEdit(newRule);
+  }
+
+  // Reset rules to official Budget 2025-26 statutory defaults
+  async function handleResetDefaults() {
+    const ok = await confirm({
+      title: 'Reset to Budget 2025-26 Defaults',
+      message: 'Are you sure you want to reset tax rules to official Budget 2025-26 statutory defaults? This will restore standard equity (20% STCG / 12.5% LTCG / ₹1.25L exemption), index funds, debt (slab rate), liquid, gold (24m / 12.5%), and pre-2024 legacy rules.',
+      confirmText: 'Reset Defaults',
+      cancelText: 'Cancel',
+      danger: false,
+    });
+    if (!ok) return;
+    await resetTaxRulesToDefaults();
+    setEditingRowId(null);
+    setEditForm(null);
   }
 
   // Edit inline trigger
@@ -194,6 +210,9 @@ export function TaxRulesModal({ isOpen, onClose }: TaxRulesModalProps) {
             </span>
           </div>
           <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+            <button className="btn btn-secondary btn-sm" onClick={handleResetDefaults} style={{ gap: 4 }}>
+              <RotateCcw size={13} /> Reset to Budget 2025-26
+            </button>
             <button className="btn btn-primary btn-sm" onClick={handleAddRule} style={{ gap: 4 }}>
               <Plus size={14} /> Add Rule
             </button>

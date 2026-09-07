@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { calculateCapitalGainsTax, type TaxRuleConfig } from '../capitalGains';
+import { getStaticDefaultTaxRule, generateDefaultTaxRules } from '../defaultRules';
 
 describe('domain/tax: calculateCapitalGainsTax', () => {
   const equityRuleFY25: TaxRuleConfig = {
@@ -57,5 +58,55 @@ describe('domain/tax: calculateCapitalGainsTax', () => {
     expect(result.total_ltcg_paise).toBe(10000000);
     expect(result.ltcg_after_exemption_paise).toBe(0);
     expect(result.tax_on_ltcg_paise).toBe(0);
+  });
+
+  describe('Budget 2025-26 Statutory Default Rules', () => {
+    it('provides correct Budget 2025-26 rates for Equity MF (20% STCG, 12.5% LTCG, ₹1.25L exemption)', () => {
+      const equityRule = getStaticDefaultTaxRule('EQUITY_MF', new Date('2025-04-01').getTime());
+
+      expect(equityRule.holding_period_months).toBe(12);
+      expect(equityRule.stcg_mode).toBe('FIXED_PERCENTAGE');
+      expect(equityRule.stcg_rate_bps).toBe(2000); // 20%
+      expect(equityRule.ltcg_mode).toBe('FIXED_PERCENTAGE');
+      expect(equityRule.ltcg_rate_bps).toBe(1250); // 12.5%
+      expect(equityRule.exemption_cap_paise).toBe(12500000); // ₹1.25 Lakh
+    });
+
+    it('provides correct Budget 2025-26 rates for Gold & Silver MF (24m holding, Slab STCG, 12.5% LTCG)', () => {
+      const goldRule = getStaticDefaultTaxRule('GOLD_MF', new Date('2025-04-01').getTime());
+
+      expect(goldRule.holding_period_months).toBe(24);
+      expect(goldRule.stcg_mode).toBe('SLAB_RATE');
+      expect(goldRule.ltcg_mode).toBe('FIXED_PERCENTAGE');
+      expect(goldRule.ltcg_rate_bps).toBe(1250); // 12.5%
+      expect(goldRule.exemption_cap_paise).toBe(0);
+    });
+
+    it('provides Section 50AA slab rate treatment for Debt MF and Liquid MF', () => {
+      const debtRule = getStaticDefaultTaxRule('DEBT_MF', new Date('2025-04-01').getTime());
+      const liquidRule = getStaticDefaultTaxRule('LIQUID_MF', new Date('2025-04-01').getTime());
+
+      expect(debtRule.stcg_mode).toBe('SLAB_RATE');
+      expect(debtRule.ltcg_mode).toBe('SLAB_RATE');
+      expect(liquidRule.stcg_mode).toBe('SLAB_RATE');
+      expect(liquidRule.ltcg_mode).toBe('SLAB_RATE');
+    });
+
+    it('provides legacy Pre-Budget 2024 rates for sales occurring before 23-Jul-2024', () => {
+      const legacyEquity = getStaticDefaultTaxRule('EQUITY_MF', new Date('2024-05-01').getTime());
+
+      expect(legacyEquity.holding_period_months).toBe(12);
+      expect(legacyEquity.stcg_rate_bps).toBe(1500); // 15%
+      expect(legacyEquity.ltcg_rate_bps).toBe(1000); // 10%
+      expect(legacyEquity.exemption_cap_paise).toBe(10000000); // ₹1.00 Lakh
+    });
+
+    it('generates complete default tax rule set with valid IDs and timestamps', () => {
+      const rules = generateDefaultTaxRules();
+
+      expect(rules.length).toBeGreaterThanOrEqual(7);
+      expect(rules.every(r => r.id.startsWith('tax_rule_default_'))).toBe(true);
+      expect(rules.every(r => r.created_at > 0 && r.updated_at > 0)).toBe(true);
+    });
   });
 });

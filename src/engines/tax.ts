@@ -5,6 +5,7 @@ import { sellFIFO, type SaleLotResult } from './fifo';
 import {
   calculateCapitalGainsTax,
   getDefaultHoldingMonths,
+  getStaticDefaultTaxRule,
 } from '@/domain/tax';
 
 export { getDefaultHoldingMonths };
@@ -40,7 +41,8 @@ export async function getHoldingThresholdMonths(asset_class: AssetClass, at_date
 }
 
 /**
- * Fetch the applicable tax rule for a given asset class at a given date
+ * Fetch the applicable tax rule for a given asset class at a given date.
+ * Automatically falls back to statutory Budget 2025-26 defaults if no custom rule matches.
  */
 export async function getApplicableTaxRule(asset_class: AssetClass, at_date: number) {
   const rules = await db.tax_rules
@@ -48,9 +50,19 @@ export async function getApplicableTaxRule(asset_class: AssetClass, at_date: num
     .filter(r => r.effective_from <= at_date && (r.effective_until === null || r.effective_until >= at_date))
     .toArray();
 
-  if (rules.length === 0) return null;
-  // Pick the most recently effective rule
-  return rules.sort((a, b) => b.effective_from - a.effective_from)[0];
+  if (rules.length > 0) {
+    // Pick the most recently effective rule
+    return rules.sort((a, b) => b.effective_from - a.effective_from)[0];
+  }
+
+  // Fallback 1: Return closest user rule for this asset class
+  const allRulesForClass = await db.tax_rules.where('asset_class').equals(asset_class).toArray();
+  if (allRulesForClass.length > 0) {
+    return allRulesForClass.sort((a, b) => b.effective_from - a.effective_from)[0];
+  }
+
+  // Fallback 2: Statutory Budget 2025-26 default rule
+  return getStaticDefaultTaxRule(asset_class, at_date);
 }
 
 /**
