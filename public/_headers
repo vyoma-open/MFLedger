@@ -1,0 +1,47 @@
+/*
+ * public/_headers
+ *
+ * Production security headers applied to all routes.
+ * Content Security Policy prevents XSS, clickjacking, and data injection.
+ * Forces HTTPS via HSTS.
+ */
+
+/*
+  # Strict Transport Security (HSTS) — force HTTPS for 1 year
+  Strict-Transport-Security: max-age=31536000; includeSubDomains; preload
+
+  # Prevent the page from being embedded in iframes (clickjacking)
+  X-Frame-Options: DENY
+  Content-Security-Policy: frame-ancestors 'none'
+
+  # Stop browsers from MIME-sniffing a response away from declared content-type
+  X-Content-Type-Options: nosniff
+
+  # Control referrer information
+  Referrer-Policy: strict-origin-when-cross-origin
+
+  # Restrict browser features
+  Permissions-Policy: geolocation=(), camera=(), microphone=(), payment=(), usb=()
+
+  # CSP: restrict resource loading
+  # - default-src 'self'             : Only load from our own origin by default
+  # - script-src 'self' 'unsafe-inline' : Vite inlines small scripts; unsafe-inline needed
+  # - style-src 'self' 'unsafe-inline' https://fonts.googleapis.com
+  # - img-src 'self' data:           : Images from self + data URIs (no external images)
+  # - font-src 'self' https://fonts.gstatic.com : Google Fonts
+  # - connect-src 'self' https://api.mfapi.in  : MFAPI for MF NAVs (direct browser call)
+  # - object-src 'none'              : No Flash, Silverlight, etc.
+  # - base-uri 'self'                : Prevent base tag injection
+  # - form-action 'self'             : Forms only submit to our own origin
+  Content-Security-Policy: default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: blob:; connect-src 'self' https://api.mfapi.in; object-src 'none'; base-uri 'self'; form-action 'self';
+
+  # Cross-Origin policies
+  Cross-Origin-Opener-Policy: same-origin
+  Cross-Origin-Resource-Policy: same-origin
+
+  # Cache control for HTML pages (never cache so updates deploy immediately)
+  Cache-Control: no-store, must-revalidate
+
+/assets/*
+  # Static assets (JS, CSS) are fingerprinted by Vite — immutable cache
+  Cache-Control: public, max-age=31536000, immutable
