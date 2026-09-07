@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { ChevronRight } from 'lucide-react';
 import { HelpButton, HelpModal } from '../Help/HelpModal';
+import { DataHealthButton, DataHealthModal, useDataHealth } from '../DataHealth';
 import { AccountSelector } from './AccountSelector';
 
 export interface BreadcrumbItem {
@@ -20,6 +21,8 @@ interface TopbarProps {
 
 export function Topbar({ title, badge, actions, breadcrumbs, showAccountSelector = false }: TopbarProps) {
   const [showHelp, setShowHelp] = useState(false);
+  const [showHealth, setShowHealth] = useState(false);
+  const healthReport = useDataHealth();
 
   return (
     <>
@@ -95,10 +98,18 @@ export function Topbar({ title, badge, actions, breadcrumbs, showAccountSelector
         <div className="topbar-actions" style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
           {actions}
           {showAccountSelector && <AccountSelector />}
+          <DataHealthButton onClick={() => setShowHealth(true)} report={healthReport} />
           <HelpButton onClick={() => setShowHelp(true)} />
         </div>
       </header>
 
+      {showHealth && (
+        <DataHealthModal
+          isOpen={showHealth}
+          onClose={() => setShowHealth(false)}
+          report={healthReport}
+        />
+      )}
       {showHelp && <HelpModal onClose={() => setShowHelp(false)} />}
     </>
   );

@@ -90,6 +90,8 @@ export interface InvestmentLot {
   updated_at: number;
   version: number;
   // ── MF-specific metadata ────────────────────
+  /** Folio number e.g. 12345678/90 */
+  folio_number?: string;
   /** ISIN code e.g. INF082J01067 */
   isin?: string;
   /** Investment plan: Direct or Regular */
